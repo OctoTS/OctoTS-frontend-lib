@@ -17,14 +17,12 @@ const ChartCard = ({
   const translations = {
     pl: {
       unsupported: 'Nieobsługiwany format',
-      onlyMock: 'Tylko dane testowe',
       close: 'Zamknij (ESC)',
       lib: 'Biblioteka',
       reqTitle: 'Minimalne wymagane dane'
     },
     en: {
       unsupported: 'Unsupported format',
-      onlyMock: 'Mock data only',
       close: 'Close (ESC)',
       lib: 'Library',
       reqTitle: 'Minimum required data'
