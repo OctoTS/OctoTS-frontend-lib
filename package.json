@@ -11,8 +11,15 @@
     "build": "vite build"
   },
   "dependencies": {
-    "chart.js": "^4.5.1",
-    "echarts": "^6.0.0"
+    "@nivo/bar": "^0.99.0",
+    "@nivo/bump": "^0.99.0",
+    "@nivo/core": "^0.99.0",
+    "@nivo/line": "^0.99.0",
+    "@nivo/pie": "^0.99.0",
+    "@nivo/stream": "^0.99.0",
+    "@vitejs/plugin-react": "^6.0.1",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5"
   },
   "devDependencies": {
     "vite": "^8.0.8"
