@@ -1,5 +1,3 @@
-// src/index.jsx
-import React from 'react';
 import { createRoot } from 'react-dom/client';
 
 // --- NIVO IMPORTS ---
@@ -8,15 +6,28 @@ import { ResponsiveBar } from '@nivo/bar';
 import { ResponsivePie } from '@nivo/pie';
 import { ResponsiveLine } from '@nivo/line';
 import { ResponsiveStream } from '@nivo/stream';
+import { ResponsiveScatterPlot } from '@nivo/scatterplot';
+import { ResponsiveRadar } from '@nivo/radar';
+import { ResponsiveHeatMap } from '@nivo/heatmap';
+import { ResponsiveChoropleth, ResponsiveGeoMap } from '@nivo/geo';
+import { ResponsiveNetwork } from '@nivo/network';
+import { ResponsiveTreeMap } from '@nivo/treemap';
+import { ResponsiveSunburst } from '@nivo/sunburst';
+import { ResponsiveChord } from '@nivo/chord';
+import { ResponsiveFunnel } from '@nivo/funnel';
+import { ResponsiveParallelCoordinates } from '@nivo/parallel-coordinates';
+import { ResponsiveSankey } from '@nivo/sankey';
+import { ResponsiveSwarmPlot } from '@nivo/swarmplot';
+import { ResponsiveMarimekko } from '@nivo/marimekko';
+import { ResponsiveBullet } from '@nivo/bullet';
+import { ResponsiveWaffle } from '@nivo/waffle';
+import { ResponsiveCalendar, ResponsiveTimeRange } from '@nivo/calendar';
+import { ResponsiveRadialBar } from '@nivo/radial-bar';
 
-// --- ECHARTS IMPORTS ---
+// --- INNE SILNIKI ---
 import ReactECharts from 'echarts-for-react';
-
-// --- CHART.JS IMPORTS ---
 import { Chart as ChartJS, registerables } from 'chart.js';
 import { Chart } from 'react-chartjs-2';
-
-// --- APEXCHARTS IMPORTS ---
 import ReactApexChart from 'react-apexcharts';
 
 ChartJS.register(...registerables);
@@ -26,7 +37,26 @@ const NivoComponents = {
     'bar': ResponsiveBar,
     'pie': ResponsivePie,
     'line': ResponsiveLine,
-    'stream': ResponsiveStream
+    'stream': ResponsiveStream,
+    'scatterplot': ResponsiveScatterPlot,
+    'radar': ResponsiveRadar,
+    'heatmap': ResponsiveHeatMap,
+    'choropleth': ResponsiveChoropleth,
+    'geomap': ResponsiveGeoMap,
+    'network': ResponsiveNetwork,
+    'treemap': ResponsiveTreeMap,
+    'sunburst': ResponsiveSunburst,
+    'chord': ResponsiveChord,
+    'funnel': ResponsiveFunnel,
+    'parallel': ResponsiveParallelCoordinates,
+    'sankey': ResponsiveSankey,
+    'swarmplot': ResponsiveSwarmPlot,
+    'marimekko': ResponsiveMarimekko,
+    'bullet': ResponsiveBullet,
+    'waffle': ResponsiveWaffle,
+    'calendar': ResponsiveCalendar,
+    'timerange': ResponsiveTimeRange,
+    'radialbar': ResponsiveRadialBar
 };
 
 export const makeplot = (chartType, data, options = {}, engine = 'nivo') => {
@@ -38,7 +68,7 @@ export const makeplot = (chartType, data, options = {}, engine = 'nivo') => {
         const ChartComponent = NivoComponents[type];
         if (!ChartComponent) {
             const err = document.createElement('div');
-            err.style.color = 'red'; err.textContent = `Błąd Nivo: Nieobsługiwany typ "${type}".`;
+            err.style.color = 'red'; err.textContent = `Błąd Nivo: Nieobsługiwany typ "${type}". Dostępne: ${Object.keys(NivoComponents).join(', ')}`;
             return err;
         }
         chartElement = (
@@ -65,14 +95,7 @@ export const makeplot = (chartType, data, options = {}, engine = 'nivo') => {
     else if (engine === 'apex') {
         chartElement = (
             <div style={{ height: '100%', width: '100%' }}>
-                {/* Apex wymaga rozdzielenia options i series(danych) */}
-                <ReactApexChart 
-                    type={type || 'line'} 
-                    series={data} 
-                    options={options} 
-                    height="100%" 
-                    width="100%" 
-                />
+                <ReactApexChart type={type || 'line'} series={data} options={options} height="100%" width="100%" />
             </div>
         );
     }
