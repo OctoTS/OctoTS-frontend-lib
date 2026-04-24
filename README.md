@@ -18,7 +18,7 @@ Currently, the library is fully ready to be used in pure HTML via a CDN link.
 Simply add the following script to the `<head>` or `<body>` section of your HTML file:
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/OctoTS/OctoTS-frontend-lib@refs/heads/feat/lib-test/dist/my-plot-lib.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/OctoTS/OctoTS-frontend-lib@refs/heads/main/dist/OctoTS-plot-lib.js"></script>
 ```
 ### NPM
 ⏳ **NPM package coming soon!** > A version installable via Node.js package managers will be available shortly.
@@ -33,7 +33,7 @@ The library exposes a global `window.makeplot` function that returns a ready-to-
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Chart Test</title>
-    <script src="https://cdn.jsdelivr.net/gh/OctoTS/OctoTS-frontend-lib@refs/heads/feat/lib-test/dist/my-plot-lib.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/OctoTS/OctoTS-frontend-lib@refs/heads/main/dist/OctoTS-plot-lib.js"></script>
 </head>
 <body>
 
