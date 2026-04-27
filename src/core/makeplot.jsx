@@ -30,6 +30,9 @@ import { Chart as ChartJS, registerables } from 'chart.js';
 import { Chart } from 'react-chartjs-2';
 import ReactApexChart from 'react-apexcharts';
 
+// --- TRANSFORMERY ---
+import { transformNivoData } from '../transformers/nivo.jsx';
+
 ChartJS.register(...registerables);
 
 const NivoComponents = {
@@ -59,32 +62,50 @@ const NivoComponents = {
     'radialbar': ResponsiveRadialBar
 };
 
-export const makeplot = (chartType, data, options = {}, engine = 'nivo') => {
+export const makeplot = (chartType, data, mapping = {}, options = {}, engine = 'nivo') => {
     let chartElement;
     const type = chartType?.toLowerCase();
+    
+    let finalData = data;
 
     // 1. SILNIK NIVO
     if (engine === 'nivo') {
         const ChartComponent = NivoComponents[type];
         if (!ChartComponent) {
             const err = document.createElement('div');
-            err.style.color = 'red'; err.textContent = `Błąd Nivo: Nieobsługiwany typ "${type}". Dostępne: ${Object.keys(NivoComponents).join(', ')}`;
+            err.style.color = 'red'; 
+            err.textContent = `Błąd Nivo: Nieobsługiwany typ "${type}".`;
             return err;
         }
+
+        // --- TRANSFORMACJA DANYCH DLA NIVO ---
+        finalData = transformNivoData(type, data, mapping);
+
+        // --- TLUMACZENIE MAPPINGU NA PROPSY NIVO ---
+        const nivoProps = { ...options };
+
+        if (type === 'bar') {
+            // Nivo Bar wymaga specjalnego wskazania kolumn
+            nivoProps.indexBy = mapping.x || options.indexBy || 'id';
+            nivoProps.keys = mapping.y ? [mapping.y] : options.keys || ['value'];
+        }
+
         chartElement = (
             <div style={{ width: '100%', height: '100%' }}>
-                <ChartComponent data={data} {...options} />
+                <ChartComponent data={finalData} {...nivoProps} />
             </div>
         );
-    } 
+    }
     // 2. SILNIK ECHARTS
     else if (engine === 'echarts') {
+        // Tu w przyszłości dodasz np: finalData = transformEchartsData(type, data, mapping);
         chartElement = (
             <ReactECharts option={options} style={{ height: '100%', width: '100%' }} opts={{ renderer: 'svg' }} />
         );
     } 
     // 3. SILNIK CHART.JS
     else if (engine === 'chartjs') {
+        // Tu w przyszłości dodasz np: finalData = transformChartJsData(type, data, mapping);
         chartElement = (
             <div style={{ position: 'relative', height: '100%', width: '100%' }}>
                 <Chart type={type || 'line'} data={data} options={options} />
@@ -93,13 +114,13 @@ export const makeplot = (chartType, data, options = {}, engine = 'nivo') => {
     }
     // 4. SILNIK APEXCHARTS
     else if (engine === 'apex') {
+        // Tu w przyszłości dodasz np: finalData = transformApexData(type, data, mapping);
         chartElement = (
             <div style={{ height: '100%', width: '100%' }}>
                 <ReactApexChart type={type || 'line'} series={data} options={options} height="100%" width="100%" />
             </div>
         );
     }
-    // BŁĄD SILNIKA
     else {
         const err = document.createElement('div');
         err.style.color = 'red'; err.textContent = `Błąd: Nieobsługiwany silnik "${engine}".`;
@@ -115,7 +136,3 @@ export const makeplot = (chartType, data, options = {}, engine = 'nivo') => {
 
     return container;
 };
-
-if (typeof window !== 'undefined') {
-    window.makeplot = makeplot;
-}
