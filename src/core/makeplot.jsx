@@ -65,6 +65,7 @@ const NivoComponents = {
     'timerange': ResponsiveTimeRange,
     'radialbar': ResponsiveRadialBar
 };
+
 // --- FUNKCJA POMOCNICZA DO AGREGACJI (ŚREDNIA) ---
 const aggregateData = (data, groupByField, method = 'avg') => {
     if (!groupByField || !data || data.length === 0) return data;
@@ -101,12 +102,12 @@ const aggregateData = (data, groupByField, method = 'avg') => {
         return finalRow;
     });
 };
+
 // --- GŁÓWNA FUNKCJA MAKEPLOT ---
 export const makeplot = (engine = 'nivo', chartType, data, mapping = {}, options = {}) => {
     let chartElement;
     const type = chartType?.toLowerCase();
     
-    // 1. Zabezpieczamy dane i od razu robimy agregację
     // 1. Zabezpieczamy dane i od razu robimy agregację
     let finalData = [...data];
     const skipAggregation = ['scatter', 'bubble', 'swarmplot'].includes(type);
@@ -228,7 +229,6 @@ export const makeplot = (engine = 'nivo', chartType, data, mapping = {}, options
     // 2. SILNIK ECHARTS
     // ==========================================
     else if (engine === 'echarts') {
-        // Przekazujemy finalData (zagregowane) zamiast data
         const echartsData = transformEchartsData(type, finalData, mapping);
         
         let option = {
@@ -370,7 +370,6 @@ export const makeplot = (engine = 'nivo', chartType, data, mapping = {}, options
     // 3. SILNIK CHART.JS
     // ==========================================
     else if (engine === 'chartjs') {
-        // Używamy finalData
         const chartData = transformChartjsData(type, finalData, mapping);
         
         let chartType = type;
@@ -405,6 +404,68 @@ export const makeplot = (engine = 'nivo', chartType, data, mapping = {}, options
         );
         return container;
     } 
+    // ==========================================
+    // 4. SILNIK APEXCHARTS
+    // ==========================================
+    else if (engine === 'apexcharts') {
+        let apexType = type;
+        if (apexType === 'polararea') apexType = 'polarArea';
+        if (apexType === 'doughnut') apexType = 'donut'; 
+        if (apexType === 'radialbar') apexType = 'radialBar';
+        
+        let apexSeries = [];
+        let apexOptions = {
+            chart: { toolbar: { show: false } },
+            legend: { position: 'bottom' },
+            ...options
+        };
+
+        const firstRowKeys = finalData.length > 0 ? Object.keys(finalData[0]) : [];
+        const groupKey = mapping.x || mapping.id || firstRowKeys[0];
+        const valueKey = mapping.y || mapping.value || firstRowKeys[1];
+
+        if (['pie', 'donut', 'polarArea', 'radialBar'].includes(apexType)) {
+            apexSeries = finalData.map(row => Number(row[valueKey]) || 0);
+            apexOptions.labels = finalData.map(row => String(row[groupKey]));
+        } 
+        else if (apexType === 'radar') {
+            const radarKeys = firstRowKeys.filter(k => k !== groupKey && !isNaN(parseFloat(finalData[0][k])));
+            apexOptions.xaxis = { categories: radarKeys };
+            apexSeries = finalData.map(row => ({
+                name: String(row[groupKey]),
+                data: radarKeys.map(k => Number(row[k]) || 0)
+            }));
+        } 
+        else {
+            apexSeries = [{
+                name: mapping.series || 'Wartość',
+                data: finalData.map(row => ({
+                    x: String(row[groupKey]),
+                    y: Number(row[valueKey]) || 0
+                }))
+            }];
+            if (!apexOptions.xaxis) {
+                apexOptions.xaxis = { type: 'category' };
+            }
+        }
+
+        const container = document.createElement('div');
+        container.style.width = '100%';
+        container.style.height = '100%';
+        container.style.minHeight = '300px';
+
+        const root = createRoot(container);
+        root.render(
+            <ReactApexChart 
+                options={apexOptions} 
+                series={apexSeries} 
+                type={apexType} 
+                height="100%" 
+                width="100%"
+            />
+        );
+        return container;
+    }
     // ==========================================
     // FALLBACK
     // ==========================================
