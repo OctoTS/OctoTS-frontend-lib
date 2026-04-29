@@ -66,34 +66,41 @@ const NivoComponents = {
     'radialbar': ResponsiveRadialBar
 };
 // --- FUNKCJA POMOCNICZA DO AGREGACJI (ŚREDNIA) ---
-const aggregateData = (data, groupByField, valueField, method = 'avg') => {
-    if (!groupByField || !valueField || !data || data.length === 0) return data;
+const aggregateData = (data, groupByField, method = 'avg') => {
+    if (!groupByField || !data || data.length === 0) return data;
 
     const grouped = {};
+    
+    // Automatycznie wykrywamy wszystkie kolumny numeryczne (pomijając klucz grupowania)
+    const numericKeys = Object.keys(data[0]).filter(k => 
+        k !== groupByField && !isNaN(parseFloat(data[0][k]))
+    );
 
     data.forEach(row => {
         const key = row[groupByField];
-        const val = Number(row[valueField]) || 0;
 
         if (!grouped[key]) {
-            grouped[key] = { sum: 0, count: 0, firstRow: { ...row } };
+            // Zapisujemy pierwszy wiersz, by zachować wszystkie teksty i strukturę
+            grouped[key] = { count: 0, sums: {}, firstRow: { ...row } };
+            numericKeys.forEach(nk => grouped[key].sums[nk] = 0);
         }
-        grouped[key].sum += val;
+        
         grouped[key].count += 1;
+        numericKeys.forEach(nk => {
+            // Sumujemy tylko kolumny liczbowe
+            grouped[key].sums[nk] += (Number(row[nk]) || 0);
+        });
     });
 
+    // Zwracamy tablicę z podmienionymi średnimi
     return Object.values(grouped).map(group => {
-        let finalValue = group.sum;
-        if (method === 'avg') {
-            finalValue = group.sum / group.count;
-        }
-        return {
-            ...group.firstRow,
-            [valueField]: finalValue
-        };
+        const finalRow = { ...group.firstRow };
+        numericKeys.forEach(nk => {
+            finalRow[nk] = method === 'avg' ? (group.sums[nk] / group.count) : group.sums[nk];
+        });
+        return finalRow;
     });
 };
-
 // --- GŁÓWNA FUNKCJA MAKEPLOT ---
 export const makeplot = (engine = 'nivo', chartType, data, mapping = {}, options = {}) => {
     let chartElement;
@@ -102,13 +109,14 @@ export const makeplot = (engine = 'nivo', chartType, data, mapping = {}, options
     // 1. Zabezpieczamy dane i od razu robimy agregację
     // 1. Zabezpieczamy dane i od razu robimy agregację
     let finalData = [...data];
-    // DODANO swarmplot DO POMIJANYCH:
     const skipAggregation = ['scatter', 'bubble', 'swarmplot'].includes(type);
 
     if (!skipAggregation && options.aggregate !== false && finalData.length > 0) {
+        // Szukamy tylko po czym grupować (np. autor)
         const groupKey = mapping.x || mapping.id || Object.keys(finalData[0])[0];
-        const valueKey = mapping.y || mapping.value || Object.keys(finalData[0])[1];
-        finalData = aggregateData(finalData, groupKey, valueKey, options.aggregate || 'avg');
+        
+        // Przekazujemy do nowej funkcji - sama zajmie się wszystkimi liczbami!
+        finalData = aggregateData(finalData, groupKey, options.aggregate || 'avg');
     }
 
     // ==========================================
