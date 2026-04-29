@@ -27,11 +27,11 @@ import { ResponsiveRadialBar } from '@nivo/radial-bar';
 // --- INNE SILNIKI ---
 import ReactECharts from 'echarts-for-react';
 import { Chart as ChartJS, registerables } from 'chart.js';
-import { Chart } from 'react-chartjs-2';
 import ReactApexChart from 'react-apexcharts';
 
 // --- TRANSFORMERY ---
 import { transformNivoData } from '../transformers/nivo.jsx';
+import { transformEchartsData } from '../transformers/echarts.jsx';
 
 ChartJS.register(...registerables);
 
@@ -62,7 +62,9 @@ const NivoComponents = {
     'radialbar': ResponsiveRadialBar
 };
 
-export const makeplot = (chartType, data, mapping = {}, options = {}, engine = 'nivo') => {
+export const makeplot = (engine = 'nivo', chartType, data, mapping = {}, options = {}) => {
+    console.log(engine);
+    
     let chartElement;
     const type = chartType?.toLowerCase();
     
@@ -230,6 +232,161 @@ export const makeplot = (chartType, data, mapping = {}, options = {}, engine = '
                 <ChartComponent data={finalData} {...nivoProps} />
             </div>
         );
+    }
+    else if (engine === 'echarts') {
+        const echartsData = transformEchartsData(type, data, mapping);
+        
+        // --- BAZOWY OBIEKT KONFIGURACYJNY ---
+        let option = {
+            tooltip: { trigger: 'item' },
+            legend: { top: 'bottom' },
+            ...options // nadpisywanie opcjami z zewnątrz
+        };
+
+        // --- MAPOWANIE WYKRESÓW ---
+        switch (type.toLowerCase()) {
+            
+            // 1. Wykresy Kartezjańskie (z osiami X i Y)
+            case 'bar':
+            case 'line':
+            case 'scatter':
+            case 'area':
+                option.dataset = { source: data }; // Używamy surowych danych
+                option.xAxis = { type: 'category' }; // Domyślnie kategorie na X
+                option.yAxis = { type: 'value' };
+                option.series = [{
+                    type: type === 'area' ? 'line' : type,
+                    areaStyle: type === 'area' ? {} : undefined,
+                    encode: {
+                        x: mapping.x || Object.keys(data[0])[0],
+                        y: mapping.y || Object.keys(data[0])[1]
+                    }
+                }];
+                // Obsługa podziału na serie (np. Miasta)
+                if (mapping.series) {
+                    option.series[0].encode.seriesName = mapping.series;
+                }
+                break;
+
+            // 2. Wykresy Kołowe / Lejki
+            case 'pie':
+            case 'funnel':
+                option.series = [{
+                    type: type,
+                    data: echartsData,
+                    radius: type === 'pie' ? ['40%', '70%'] : undefined, // Robimy ładnego Donuta domyślnie
+                    emphasis: {
+                        itemStyle: {
+                            shadowBlur: 10,
+                            shadowOffsetX: 0,
+                            shadowColor: 'rgba(0, 0, 0, 0.5)'
+                        }
+                    }
+                }];
+                break;
+
+            // 3. Radar
+            case 'radar':
+                // Radar w ECharts jest specyficzny, wymaga definicji 'indicator'
+                const keys = Object.keys(data[0]).filter(k => k !== mapping.x);
+                option.radar = {
+                    indicator: keys.map(k => ({ name: k }))
+                };
+                option.series = [{
+                    type: 'radar',
+                    data: data.map(row => ({
+                        value: keys.map(k => Number(row[k]) || 0),
+                        name: row[mapping.x]
+                    }))
+                }];
+                break;
+
+            // 4. Hierarchiczne
+            case 'treemap':
+            case 'sunburst':
+                option.series = [{
+                    type: type,
+                    data: echartsData,
+                    // Dodatkowe opcje wyglądu dla hierarchicznych
+                    roam: false,
+                    label: { show: true, formatter: '{b}' } 
+                }];
+                break;
+
+            // 5. Sieciowe i Przepływy
+            case 'network':
+            case 'graph':
+                option.series = [{
+                    type: 'graph',
+                    layout: 'force',
+                    data: echartsData.data,
+                    links: echartsData.links,
+                    roam: true,
+                    label: { show: true }
+                }];
+                break;
+
+            case 'sankey':
+                option.series = [{
+                    type: 'sankey',
+                    data: echartsData.data,
+                    links: echartsData.links,
+                    emphasis: { focus: 'adjacency' },
+                    lineStyle: { color: 'gradient', curveness: 0.5 }
+                }];
+                break;
+
+            // 6. Heatmapa
+            case 'heatmap':
+                option.dataset = { source: data };
+                option.xAxis = { type: 'category' };
+                option.yAxis = { type: 'category' };
+                option.visualMap = {
+                    min: 0,
+                    max: Math.max(...data.map(d => Number(d[mapping.value || Object.keys(d)[2]]) || 0)),
+                    calculable: true,
+                    orient: 'horizontal',
+                    left: 'center',
+                    bottom: '15%'
+                };
+                option.series = [{
+                    type: 'heatmap',
+                    encode: {
+                        x: mapping.x || Object.keys(data[0])[0],
+                        y: mapping.y || Object.keys(data[0])[1],
+                        value: mapping.value || Object.keys(data[0])[2]
+                    }
+                }];
+                break;
+
+            default:
+                console.warn(`[MakePlot] Wykres typu '${type}' nie ma specyficznej konfiguracji w ECharts, próbuję standardowego rysowania.`);
+                option.dataset = { source: data };
+                option.series = [{ type: type }];
+                break;
+        }
+
+        // Zwracamy komponent ECharts
+        const container = document.createElement('div');
+        container.style.width = '100%';
+        container.style.height = '100%';
+        container.style.minHeight = '300px';
+
+        // 2. Importujemy narzędzie do renderowania Reacta (upewnij się, że masz to zaimportowane na górze pliku!)
+        // import { createRoot } from 'react-dom/client'; 
+
+        // 3. Renderujemy komponent ReactECharts wewnątrz naszego kontenera DOM
+        const root = createRoot(container);
+        root.render(
+            <ReactECharts 
+                option={option} 
+                style={{ height: '100%', width: '100%' }} 
+                opts={{ renderer: 'svg' }} 
+            />
+        );
+
+        // 4. Zwracamy gotowy węzeł DOM, tak jak oczekuje tego HTML i appendChild
+        return container;
     }
     else {
         const err = document.createElement('div');
