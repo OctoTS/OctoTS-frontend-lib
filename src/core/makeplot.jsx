@@ -78,46 +78,156 @@ export const makeplot = (chartType, data, mapping = {}, options = {}, engine = '
             return err;
         }
 
-        // --- TRANSFORMACJA DANYCH DLA NIVO ---
-        finalData = transformNivoData(type, data, mapping);
+        const unsupportedCharts = ['parallel', 'choropleth', 'geomap'];
+        if (unsupportedCharts.includes(type.toLowerCase())) {
+            console.warn(`[MakePlot] Wykres typu '${type}' nie jest obsługiwany przez tę bibliotekę.`);
+            
+            // Tworzymy klasyczny element DOM zamiast zwracać JSX (React)
+            const errorContainer = document.createElement('div');
+            errorContainer.style.display = 'flex';
+            errorContainer.style.alignItems = 'center';
+            errorContainer.style.justifyContent = 'center';
+            errorContainer.style.height = '100%';
+            errorContainer.style.width = '100%';
+            errorContainer.style.backgroundColor = '#ffeeee';
+            errorContainer.style.color = '#cc0000';
+            errorContainer.style.borderRadius = '4px';
+            errorContainer.style.padding = '10px';
+            errorContainer.style.textAlign = 'center';
+            errorContainer.style.boxSizing = 'border-box';
+            
+            errorContainer.innerHTML = `Wykres typu <b>${type}</b> nie jest obecnie obsługiwany.`;
+            
+            return errorContainer;
+        }
 
-        // --- TLUMACZENIE MAPPINGU NA PROPSY NIVO ---
+        // ... (pobieranie komponentu ChartComponent i transformacja danych)
+        let finalData = transformNivoData(type, data, mapping);
         const nivoProps = { ...options };
 
-        if (type === 'bar') {
-            // Nivo Bar wymaga specjalnego wskazania kolumn
-            nivoProps.indexBy = mapping.x || options.indexBy || 'id';
-            nivoProps.keys = mapping.y ? [mapping.y] : options.keys || ['value'];
+        switch (type) {
+            case 'bar':
+            case 'radar':
+                nivoProps.indexBy = mapping.x || options.indexBy || 'id';
+                nivoProps.keys = mapping.y ? [mapping.y] : options.keys || ['value'];
+                break;
+
+            case 'swarmplot':
+                nivoProps.groupBy = mapping.x || options.groupBy || 'id';
+                nivoProps.value = mapping.y || options.value || 'value';
+                nivoProps.identity = mapping.id || mapping.x || 'id'; 
+                if (!nivoProps.groups && finalData.length > 0) {
+                    nivoProps.groups = Array.from(new Set(finalData.map(item => String(item[nivoProps.groupBy]))));
+                }
+                finalData = finalData.map(row => ({ ...row, [nivoProps.value]: Number(row[nivoProps.value]) || 0 }));
+                break;
+            
+            // --- 2. NAPRAWA SUNBURST I TREEMAP ---
+            case 'treemap':
+                nivoProps.identity = 'id';
+                nivoProps.value = 'value';
+                break;
+
+            case 'sunburst':
+                nivoProps.id = 'id';
+                nivoProps.value = 'value';
+                nivoProps.cornerRadius = 2; // Czasem pomaga D3 narysować krawędzie
+                break;
+
+            // (resztę switcha, np. calendar, chord, bullet zostawiasz bez zmian. 
+            // Możesz usunąć case dla parallel, choropleth i geomap, bo i tak do nich nie dojdziemy)
+
+            case 'calendar':
+            case 'timerange':
+                if (!nivoProps.from) nivoProps.from = finalData[0]?.day || '2023-01-01';
+                if (!nivoProps.to) nivoProps.to = finalData[finalData.length - 1]?.day || '2023-12-31';
+                break;
+
+            case 'chord':
+                nivoProps.keys = finalData.keys;
+                finalData = finalData.matrix; 
+                break;
+
+            case 'swarmplot':
+                nivoProps.groupBy = mapping.x || options.groupBy || 'id';
+                nivoProps.value = mapping.y || options.value || 'value';
+                
+                // 1. Nivo musi umieć unikalnie zidentyfikować każdą "kulkę"
+                nivoProps.identity = mapping.id || mapping.x || 'id'; 
+                
+                // 2. SwarmPlot absolutnie wymaga zdefiniowanej tablicy grup!
+                if (!nivoProps.groups && finalData.length > 0) {
+                    nivoProps.groups = Array.from(new Set(finalData.map(item => String(item[nivoProps.groupBy]))));
+                }
+
+                // 3. Upewniamy się, że wartość Y jest liczbą
+                finalData = finalData.map(row => ({
+                    ...row,
+                    [nivoProps.value]: Number(row[nivoProps.value]) || 0
+                }));
+                break;
+
+            case 'parallel':
+                if (!nivoProps.variables && finalData.length > 0) {
+                    // Wykluczamy klucz etykiety/kategorii
+                    const excludeKey = mapping.id || mapping.x || 'id';
+                    
+                    // Szukamy kluczy, ale sprawdzamy, czy pierwszy wiersz to faktycznie liczba
+                    // Wykluczymy tym samym ewentualne inne kolumny tekstowe z CSV
+                    const keys = Object.keys(finalData[0]).filter(k => 
+                        k !== excludeKey && !isNaN(parseFloat(finalData[0][k]))
+                    );
+                    
+                    nivoProps.variables = keys.map(k => ({ 
+                        id: k,       // Nowsze Nivo
+                        key: k,      // Starsze Nivo
+                        value: k,    // Akcesor wartości (rozwiązuje błąd pustych linii)
+                        type: 'linear',
+                        min: 'auto',
+                        max: 'auto'
+                    }));
+                }
+
+                // PANCERNE CZYSZCZENIE DANYCH:
+                // Budujemy czyste obiekty tylko z tym, co potrzebuje Parallel i wymuszamy float
+                finalData = finalData.map(row => {
+                    const cleanRow = {};
+                    nivoProps.variables.forEach(v => {
+                        // Jeśli w komórce jest pusto lub błąd - wymuszamy 0, by skala nie padła
+                        cleanRow[v.id] = parseFloat(row[v.id]) || 0; 
+                    });
+                    return cleanRow;
+                });
+                break;
+
+            case 'marimekko':
+                nivoProps.id = mapping.x || options.id || 'id';
+                nivoProps.value = mapping.y || options.value || 'value';
+                if (!nivoProps.dimensions) {
+                    nivoProps.dimensions = [{ id: 'Domyślny wymiar', value: mapping.y || 'value' }];
+                }
+                break;
+
+            case 'stream':
+                // Wyciągamy klucze z mapowania lub opcji
+                nivoProps.keys = mapping.y ? [mapping.y] : options.keys;
+                
+                if (nivoProps.keys && finalData.length > 0) {
+                    // Wymuszamy konwersję wartości na liczby, by d3-shape nie wygenerowało NaN
+                    finalData = finalData.map(row => {
+                        const cleanRow = { ...row };
+                        nivoProps.keys.forEach(key => {
+                            cleanRow[key] = Number(cleanRow[key]) || 0;
+                        });
+                        return cleanRow;
+                    });
+                }
+                break;
         }
 
         chartElement = (
             <div style={{ width: '100%', height: '100%' }}>
                 <ChartComponent data={finalData} {...nivoProps} />
-            </div>
-        );
-    }
-    // 2. SILNIK ECHARTS
-    else if (engine === 'echarts') {
-        // Tu w przyszłości dodasz np: finalData = transformEchartsData(type, data, mapping);
-        chartElement = (
-            <ReactECharts option={options} style={{ height: '100%', width: '100%' }} opts={{ renderer: 'svg' }} />
-        );
-    } 
-    // 3. SILNIK CHART.JS
-    else if (engine === 'chartjs') {
-        // Tu w przyszłości dodasz np: finalData = transformChartJsData(type, data, mapping);
-        chartElement = (
-            <div style={{ position: 'relative', height: '100%', width: '100%' }}>
-                <Chart type={type || 'line'} data={data} options={options} />
-            </div>
-        );
-    }
-    // 4. SILNIK APEXCHARTS
-    else if (engine === 'apex') {
-        // Tu w przyszłości dodasz np: finalData = transformApexData(type, data, mapping);
-        chartElement = (
-            <div style={{ height: '100%', width: '100%' }}>
-                <ReactApexChart type={type || 'line'} series={data} options={options} height="100%" width="100%" />
             </div>
         );
     }
