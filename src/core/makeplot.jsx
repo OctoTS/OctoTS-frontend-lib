@@ -26,13 +26,17 @@ import { ResponsiveRadialBar } from '@nivo/radial-bar';
 
 // --- INNE SILNIKI ---
 import ReactECharts from 'echarts-for-react';
-import { Chart as ChartJS, registerables } from 'chart.js';
 import ReactApexChart from 'react-apexcharts';
 
 // --- TRANSFORMERY ---
 import { transformNivoData } from '../transformers/nivo.jsx';
 import { transformEchartsData } from '../transformers/echarts.jsx';
 
+import { Chart as ChartJS, registerables } from 'chart.js';
+import { Chart as ReactChartjs } from 'react-chartjs-2';
+import { transformChartjsData } from '../transformers/chartsjs.jsx';
+
+// Rejestracja wszystkich kontrolerów i elementów Chart.js
 ChartJS.register(...registerables);
 
 const NivoComponents = {
@@ -61,16 +65,55 @@ const NivoComponents = {
     'timerange': ResponsiveTimeRange,
     'radialbar': ResponsiveRadialBar
 };
+// --- FUNKCJA POMOCNICZA DO AGREGACJI (ŚREDNIA) ---
+const aggregateData = (data, groupByField, valueField, method = 'avg') => {
+    if (!groupByField || !valueField || !data || data.length === 0) return data;
 
+    const grouped = {};
+
+    data.forEach(row => {
+        const key = row[groupByField];
+        const val = Number(row[valueField]) || 0;
+
+        if (!grouped[key]) {
+            grouped[key] = { sum: 0, count: 0, firstRow: { ...row } };
+        }
+        grouped[key].sum += val;
+        grouped[key].count += 1;
+    });
+
+    return Object.values(grouped).map(group => {
+        let finalValue = group.sum;
+        if (method === 'avg') {
+            finalValue = group.sum / group.count;
+        }
+        return {
+            ...group.firstRow,
+            [valueField]: finalValue
+        };
+    });
+};
+
+// --- GŁÓWNA FUNKCJA MAKEPLOT ---
 export const makeplot = (engine = 'nivo', chartType, data, mapping = {}, options = {}) => {
-    console.log(engine);
-    
     let chartElement;
     const type = chartType?.toLowerCase();
     
-    let finalData = data;
+    // 1. Zabezpieczamy dane i od razu robimy agregację
+    // 1. Zabezpieczamy dane i od razu robimy agregację
+    let finalData = [...data];
+    // DODANO swarmplot DO POMIJANYCH:
+    const skipAggregation = ['scatter', 'bubble', 'swarmplot'].includes(type);
 
+    if (!skipAggregation && options.aggregate !== false && finalData.length > 0) {
+        const groupKey = mapping.x || mapping.id || Object.keys(finalData[0])[0];
+        const valueKey = mapping.y || mapping.value || Object.keys(finalData[0])[1];
+        finalData = aggregateData(finalData, groupKey, valueKey, options.aggregate || 'avg');
+    }
+
+    // ==========================================
     // 1. SILNIK NIVO
+    // ==========================================
     if (engine === 'nivo') {
         const ChartComponent = NivoComponents[type];
         if (!ChartComponent) {
@@ -81,10 +124,8 @@ export const makeplot = (engine = 'nivo', chartType, data, mapping = {}, options
         }
 
         const unsupportedCharts = ['parallel', 'choropleth', 'geomap'];
-        if (unsupportedCharts.includes(type.toLowerCase())) {
+        if (unsupportedCharts.includes(type)) {
             console.warn(`[MakePlot] Wykres typu '${type}' nie jest obsługiwany przez tę bibliotekę.`);
-            
-            // Tworzymy klasyczny element DOM zamiast zwracać JSX (React)
             const errorContainer = document.createElement('div');
             errorContainer.style.display = 'flex';
             errorContainer.style.alignItems = 'center';
@@ -97,14 +138,12 @@ export const makeplot = (engine = 'nivo', chartType, data, mapping = {}, options
             errorContainer.style.padding = '10px';
             errorContainer.style.textAlign = 'center';
             errorContainer.style.boxSizing = 'border-box';
-            
             errorContainer.innerHTML = `Wykres typu <b>${type}</b> nie jest obecnie obsługiwany.`;
-            
             return errorContainer;
         }
 
-        // ... (pobieranie komponentu ChartComponent i transformacja danych)
-        let finalData = transformNivoData(type, data, mapping);
+        // Transformacja pod Nivo z użyciem ZAGREGOWANYCH danych
+        finalData = transformNivoData(type, finalData, mapping);
         const nivoProps = { ...options };
 
         switch (type) {
@@ -114,17 +153,6 @@ export const makeplot = (engine = 'nivo', chartType, data, mapping = {}, options
                 nivoProps.keys = mapping.y ? [mapping.y] : options.keys || ['value'];
                 break;
 
-            case 'swarmplot':
-                nivoProps.groupBy = mapping.x || options.groupBy || 'id';
-                nivoProps.value = mapping.y || options.value || 'value';
-                nivoProps.identity = mapping.id || mapping.x || 'id'; 
-                if (!nivoProps.groups && finalData.length > 0) {
-                    nivoProps.groups = Array.from(new Set(finalData.map(item => String(item[nivoProps.groupBy]))));
-                }
-                finalData = finalData.map(row => ({ ...row, [nivoProps.value]: Number(row[nivoProps.value]) || 0 }));
-                break;
-            
-            // --- 2. NAPRAWA SUNBURST I TREEMAP ---
             case 'treemap':
                 nivoProps.identity = 'id';
                 nivoProps.value = 'value';
@@ -133,11 +161,8 @@ export const makeplot = (engine = 'nivo', chartType, data, mapping = {}, options
             case 'sunburst':
                 nivoProps.id = 'id';
                 nivoProps.value = 'value';
-                nivoProps.cornerRadius = 2; // Czasem pomaga D3 narysować krawędzie
+                nivoProps.cornerRadius = 2;
                 break;
-
-            // (resztę switcha, np. calendar, chord, bullet zostawiasz bez zmian. 
-            // Możesz usunąć case dla parallel, choropleth i geomap, bo i tak do nich nie dojdziemy)
 
             case 'calendar':
             case 'timerange':
@@ -153,53 +178,14 @@ export const makeplot = (engine = 'nivo', chartType, data, mapping = {}, options
             case 'swarmplot':
                 nivoProps.groupBy = mapping.x || options.groupBy || 'id';
                 nivoProps.value = mapping.y || options.value || 'value';
-                
-                // 1. Nivo musi umieć unikalnie zidentyfikować każdą "kulkę"
                 nivoProps.identity = mapping.id || mapping.x || 'id'; 
-                
-                // 2. SwarmPlot absolutnie wymaga zdefiniowanej tablicy grup!
                 if (!nivoProps.groups && finalData.length > 0) {
                     nivoProps.groups = Array.from(new Set(finalData.map(item => String(item[nivoProps.groupBy]))));
                 }
-
-                // 3. Upewniamy się, że wartość Y jest liczbą
                 finalData = finalData.map(row => ({
                     ...row,
                     [nivoProps.value]: Number(row[nivoProps.value]) || 0
                 }));
-                break;
-
-            case 'parallel':
-                if (!nivoProps.variables && finalData.length > 0) {
-                    // Wykluczamy klucz etykiety/kategorii
-                    const excludeKey = mapping.id || mapping.x || 'id';
-                    
-                    // Szukamy kluczy, ale sprawdzamy, czy pierwszy wiersz to faktycznie liczba
-                    // Wykluczymy tym samym ewentualne inne kolumny tekstowe z CSV
-                    const keys = Object.keys(finalData[0]).filter(k => 
-                        k !== excludeKey && !isNaN(parseFloat(finalData[0][k]))
-                    );
-                    
-                    nivoProps.variables = keys.map(k => ({ 
-                        id: k,       // Nowsze Nivo
-                        key: k,      // Starsze Nivo
-                        value: k,    // Akcesor wartości (rozwiązuje błąd pustych linii)
-                        type: 'linear',
-                        min: 'auto',
-                        max: 'auto'
-                    }));
-                }
-
-                // PANCERNE CZYSZCZENIE DANYCH:
-                // Budujemy czyste obiekty tylko z tym, co potrzebuje Parallel i wymuszamy float
-                finalData = finalData.map(row => {
-                    const cleanRow = {};
-                    nivoProps.variables.forEach(v => {
-                        // Jeśli w komórce jest pusto lub błąd - wymuszamy 0, by skala nie padła
-                        cleanRow[v.id] = parseFloat(row[v.id]) || 0; 
-                    });
-                    return cleanRow;
-                });
                 break;
 
             case 'marimekko':
@@ -211,11 +197,8 @@ export const makeplot = (engine = 'nivo', chartType, data, mapping = {}, options
                 break;
 
             case 'stream':
-                // Wyciągamy klucze z mapowania lub opcji
                 nivoProps.keys = mapping.y ? [mapping.y] : options.keys;
-                
                 if (nivoProps.keys && finalData.length > 0) {
-                    // Wymuszamy konwersję wartości na liczby, by d3-shape nie wygenerowało NaN
                     finalData = finalData.map(row => {
                         const cleanRow = { ...row };
                         nivoProps.keys.forEach(key => {
@@ -233,48 +216,48 @@ export const makeplot = (engine = 'nivo', chartType, data, mapping = {}, options
             </div>
         );
     }
+    // ==========================================
+    // 2. SILNIK ECHARTS
+    // ==========================================
     else if (engine === 'echarts') {
-        const echartsData = transformEchartsData(type, data, mapping);
+        // Przekazujemy finalData (zagregowane) zamiast data
+        const echartsData = transformEchartsData(type, finalData, mapping);
         
-        // --- BAZOWY OBIEKT KONFIGURACYJNY ---
         let option = {
             tooltip: { trigger: 'item' },
             legend: { top: 'bottom' },
-            ...options // nadpisywanie opcjami z zewnątrz
+            ...options 
         };
 
-        // --- MAPOWANIE WYKRESÓW ---
-        switch (type.toLowerCase()) {
-            
-            // 1. Wykresy Kartezjańskie (z osiami X i Y)
+        const firstRowKeys = finalData.length > 0 ? Object.keys(finalData[0]) : [];
+
+        switch (type) {
             case 'bar':
             case 'line':
             case 'scatter':
             case 'area':
-                option.dataset = { source: data }; // Używamy surowych danych
-                option.xAxis = { type: 'category' }; // Domyślnie kategorie na X
+                option.dataset = { source: finalData }; 
+                option.xAxis = { type: 'category' }; 
                 option.yAxis = { type: 'value' };
                 option.series = [{
                     type: type === 'area' ? 'line' : type,
                     areaStyle: type === 'area' ? {} : undefined,
                     encode: {
-                        x: mapping.x || Object.keys(data[0])[0],
-                        y: mapping.y || Object.keys(data[0])[1]
+                        x: mapping.x || firstRowKeys[0],
+                        y: mapping.y || firstRowKeys[1]
                     }
                 }];
-                // Obsługa podziału na serie (np. Miasta)
                 if (mapping.series) {
                     option.series[0].encode.seriesName = mapping.series;
                 }
                 break;
 
-            // 2. Wykresy Kołowe / Lejki
             case 'pie':
             case 'funnel':
                 option.series = [{
                     type: type,
                     data: echartsData,
-                    radius: type === 'pie' ? ['40%', '70%'] : undefined, // Robimy ładnego Donuta domyślnie
+                    radius: type === 'pie' ? ['40%', '70%'] : undefined, 
                     emphasis: {
                         itemStyle: {
                             shadowBlur: 10,
@@ -285,35 +268,30 @@ export const makeplot = (engine = 'nivo', chartType, data, mapping = {}, options
                 }];
                 break;
 
-            // 3. Radar
             case 'radar':
-                // Radar w ECharts jest specyficzny, wymaga definicji 'indicator'
-                const keys = Object.keys(data[0]).filter(k => k !== mapping.x);
+                const radarKeys = firstRowKeys.filter(k => k !== mapping.x);
                 option.radar = {
-                    indicator: keys.map(k => ({ name: k }))
+                    indicator: radarKeys.map(k => ({ name: k }))
                 };
                 option.series = [{
                     type: 'radar',
-                    data: data.map(row => ({
-                        value: keys.map(k => Number(row[k]) || 0),
+                    data: finalData.map(row => ({
+                        value: radarKeys.map(k => Number(row[k]) || 0),
                         name: row[mapping.x]
                     }))
                 }];
                 break;
 
-            // 4. Hierarchiczne
             case 'treemap':
             case 'sunburst':
                 option.series = [{
                     type: type,
                     data: echartsData,
-                    // Dodatkowe opcje wyglądu dla hierarchicznych
                     roam: false,
                     label: { show: true, formatter: '{b}' } 
                 }];
                 break;
 
-            // 5. Sieciowe i Przepływy
             case 'network':
             case 'graph':
                 option.series = [{
@@ -336,14 +314,13 @@ export const makeplot = (engine = 'nivo', chartType, data, mapping = {}, options
                 }];
                 break;
 
-            // 6. Heatmapa
             case 'heatmap':
-                option.dataset = { source: data };
+                option.dataset = { source: finalData };
                 option.xAxis = { type: 'category' };
                 option.yAxis = { type: 'category' };
                 option.visualMap = {
                     min: 0,
-                    max: Math.max(...data.map(d => Number(d[mapping.value || Object.keys(d)[2]]) || 0)),
+                    max: Math.max(...finalData.map(d => Number(d[mapping.value || Object.keys(d)[2]]) || 0)),
                     calculable: true,
                     orient: 'horizontal',
                     left: 'center',
@@ -352,30 +329,25 @@ export const makeplot = (engine = 'nivo', chartType, data, mapping = {}, options
                 option.series = [{
                     type: 'heatmap',
                     encode: {
-                        x: mapping.x || Object.keys(data[0])[0],
-                        y: mapping.y || Object.keys(data[0])[1],
-                        value: mapping.value || Object.keys(data[0])[2]
+                        x: mapping.x || firstRowKeys[0],
+                        y: mapping.y || firstRowKeys[1],
+                        value: mapping.value || firstRowKeys[2]
                     }
                 }];
                 break;
 
             default:
-                console.warn(`[MakePlot] Wykres typu '${type}' nie ma specyficznej konfiguracji w ECharts, próbuję standardowego rysowania.`);
-                option.dataset = { source: data };
+                console.warn(`[MakePlot] Wykres typu '${type}' nie ma specyficznej konfiguracji w ECharts.`);
+                option.dataset = { source: finalData };
                 option.series = [{ type: type }];
                 break;
         }
 
-        // Zwracamy komponent ECharts
         const container = document.createElement('div');
         container.style.width = '100%';
         container.style.height = '100%';
         container.style.minHeight = '300px';
 
-        // 2. Importujemy narzędzie do renderowania Reacta (upewnij się, że masz to zaimportowane na górze pliku!)
-        // import { createRoot } from 'react-dom/client'; 
-
-        // 3. Renderujemy komponent ReactECharts wewnątrz naszego kontenera DOM
         const root = createRoot(container);
         root.render(
             <ReactECharts 
@@ -384,16 +356,57 @@ export const makeplot = (engine = 'nivo', chartType, data, mapping = {}, options
                 opts={{ renderer: 'svg' }} 
             />
         );
-
-        // 4. Zwracamy gotowy węzeł DOM, tak jak oczekuje tego HTML i appendChild
         return container;
     }
+    // ==========================================
+    // 3. SILNIK CHART.JS
+    // ==========================================
+    else if (engine === 'chartjs') {
+        // Używamy finalData
+        const chartData = transformChartjsData(type, finalData, mapping);
+        
+        let chartType = type;
+        if (chartType === 'polararea') chartType = 'polarArea';
+        if (chartType === 'area') {
+            chartType = 'line';
+            chartData.datasets.forEach(ds => ds.fill = true); 
+        }
+        if (chartType === 'donut') chartType = 'doughnut';
+
+        const chartOptions = {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { position: 'bottom' }
+            },
+            ...options
+        };
+
+        const container = document.createElement('div');
+        container.style.width = '100%';
+        container.style.height = '100%';
+        container.style.minHeight = '300px';
+
+        const root = createRoot(container);
+        root.render(
+            <ReactChartjs 
+                type={chartType}
+                data={chartData} 
+                options={chartOptions} 
+            />
+        );
+        return container;
+    } 
+    // ==========================================
+    // FALLBACK
+    // ==========================================
     else {
         const err = document.createElement('div');
         err.style.color = 'red'; err.textContent = `Błąd: Nieobsługiwany silnik "${engine}".`;
         return err;
     }
 
+    // Wykonuje się tylko dla Nivo (inne silniki mają własne return)
     const container = document.createElement('div');
     container.style.width = '100%';
     container.style.height = '100%';
