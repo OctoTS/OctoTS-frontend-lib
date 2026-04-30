@@ -75,7 +75,22 @@ The library exposes a global `window.makeplot` function that returns a ready-to-
 
 Instead of hardcoding data, OctoTS Plot Lib comes with a built-in asynchronous helper function `window.loadData()` that parses external data sources into the exact flat array format required by `makeplot`.
 
-**⚠️ Supported File Formats**: Currently, `loadData()` exclusively supports parsing **CSV** format.
+### 🗃️ Supported File Formats
+
+`loadData()` parses flat text files, binary data formats, and databases directly in the browser:
+- **Text / Web**: CSV, TSV, JSON, JSONL
+- **Big Data / Arrow**: Parquet (`.parquet`), Feather / Apache Arrow (`.feather`, `.arrow`). (Note: Feather/Arrow files must be saved without compression, e.g., `compression="uncompressed"` in Pandas).
+- **Spreadsheets**: Excel (`.xlsx`, `.xls`)
+- **Databases**: SQLite (`.db`, `.sqlite`)
+
+### 📦 Dynamic Dependencies (Zero-Bloat Architecture)
+
+To keep the core library ultra-lightweight and prevent your browser from crashing on load, OctoTS Plot Lib utilizes **Dynamic CDN Imports**. Heavy WebAssembly (WASM) engines and binary parsers are downloaded only when you actively attempt to load a specific file type:
+
+- **Excel parsing**: Relies dynamically on [SheetJS](https://sheetjs.com/).
+- **SQLite parsing**: Relies dynamically on [sql.js](https://sql.js.org/#/) (WASM).
+- **Parquet & Feather parsing**: Relies dynamically on [parquet-wasm](https://github.com/kylebarron/parquet-wasm) and [apache-arrow](https://arrow.apache.org/js/current/).
+
 
 ### API: `await window.loadData(source)`
 - **Returns**: A `Promise` that resolves to an `Array of Objects` (parsed flat data).
