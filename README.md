@@ -111,7 +111,7 @@ To keep the core library ultra-lightweight and prevent your browser from crashin
     async function renderFromUrl() {
         try {
             // Fetch and parse data from a remote CSV
-            const data = await window.loadData("https://raw.githubusercontent.com/OctoTS/OctoTS-demo/refs/heads/metrics-data-1/metrics.csv");
+            const {data, columns} = await window.loadData("https://raw.githubusercontent.com/OctoTS/OctoTS-demo/refs/heads/metrics-data-1/metrics.csv");
             
             // Render chart directly with fetched data
             const chartNode = window.makeplot('nivo', 'bar', data, { x: 'timestamp', y: 'lines_of_code' });
