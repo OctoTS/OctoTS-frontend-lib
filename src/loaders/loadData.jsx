@@ -78,7 +78,6 @@ const parseSQLite = async (arrayBuffer) => {
 };
 
 // PARQUET (.parquet) -> Wykorzystuje parquet-wasm
-// PARQUET (.parquet) -> Wykorzystuje parquet-wasm
 const parseParquet = async (arrayBuffer) => {
     // Używamy zaktualizowanych ścieżek z jsDelivr dla wersji 0.6.1
     const parquetWasm = await import('https://cdn.jsdelivr.net/npm/parquet-wasm@0.6.1/esm/parquet_wasm.js');
@@ -112,7 +111,6 @@ const parseFeather = async (arrayBuffer) => {
     }
 };
 
-
 const getExtension = (filename) => filename.split('?')[0].split('.').pop().toLowerCase();
 
 /**
@@ -142,26 +140,60 @@ export const loadData = async (source) => {
 
     // Decoder tekstowy dla formatów starszych (CSV, JSON)
     const textDecoder = new TextDecoder('utf-8');
+    
+    // Zmienna przechowująca wynik parsowania przed dodaniem metadanych
+    let parsedData = [];
 
     // 2. PARSOWANIE
     try {
         switch (extension) {
-            case 'csv': return parseDelimited(textDecoder.decode(arrayBuffer), ',');
-            case 'tsv': return parseDelimited(textDecoder.decode(arrayBuffer), '\t');
-            case 'json': return parseJSON(textDecoder.decode(arrayBuffer));
-            case 'jsonl': return parseJSONL(textDecoder.decode(arrayBuffer));
+            case 'csv': 
+                parsedData = parseDelimited(textDecoder.decode(arrayBuffer), ','); 
+                break;
+            case 'tsv': 
+                parsedData = parseDelimited(textDecoder.decode(arrayBuffer), '\t'); 
+                break;
+            case 'json': 
+                parsedData = parseJSON(textDecoder.decode(arrayBuffer)); 
+                break;
+            case 'jsonl': 
+                parsedData = parseJSONL(textDecoder.decode(arrayBuffer)); 
+                break;
             case 'xlsx': 
-            case 'xls': return await parseExcel(arrayBuffer);
+            case 'xls': 
+                parsedData = await parseExcel(arrayBuffer); 
+                break;
             case 'sqlite':
-            case 'db': return await parseSQLite(arrayBuffer);
-            case 'parquet': return await parseParquet(arrayBuffer);
+            case 'db': 
+                parsedData = await parseSQLite(arrayBuffer); 
+                break;
+            case 'parquet': 
+                parsedData = await parseParquet(arrayBuffer); 
+                break;
             case 'feather':
-            case 'arrow': return await parseFeather(arrayBuffer);
+            case 'arrow': 
+                parsedData = await parseFeather(arrayBuffer); 
+                break;
             default:
                 console.warn(`Nieznane rozszerzenie: .${extension}. Próba parsowania jako CSV...`);
-                return parseDelimited(textDecoder.decode(arrayBuffer), ',');
+                parsedData = parseDelimited(textDecoder.decode(arrayBuffer), ',');
+                break;
         }
     } catch (error) {
         throw new Error(`Błąd podczas parsowania pliku .${extension}: ${error.message}`);
     }
+
+    // 3. WYCIĄGANIE KOLUMN I ZWRACANIE OBIEKTU W STYLU PYTHONOWYM
+    if (!parsedData || parsedData.length === 0) {
+        return { data: [], columns: [] };
+    }
+
+    // Wyciągamy klucze z pierwszego wiersza (nagłówki)
+    const columns = Object.keys(parsedData[0]);
+
+    // Zwracamy obiekt z danymi i nagłówkami
+    return {
+        data: parsedData,
+        columns: columns
+    };
 };
