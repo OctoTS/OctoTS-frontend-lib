@@ -1,23 +1,41 @@
 /**
  * Plik: src/transformers/nivo.js
- * * @param {string} type - Typ wykresu (np. 'line', 'pie', 'bar')
- * @param {Array} data - Płaskie dane z CSV (tablica obiektów)
- * @param {Object} mapping - Obiekt wskazujący, z których kolumn korzystać
+ * @param {string} type - Typ wykresu (np. 'line', 'pie', 'bar', 'stream')
+ * @param {Array} data - Płaskie dane z CSV/JSON (tablica obiektów)
+ * @param {Object} mapping - Obiekt wskazujący, z których kolumn korzystać (x, y, series itp.)
  */
 const parseToArray = (val) => String(val || '').split(/[,;-]/).map(Number).filter(n => !isNaN(n));
 
 export const transformNivoData = (type, data, mapping = {}) => {
+    // console.log("data before", type, data);
+    
     if (!data || data.length === 0) return [];
 
     switch (type?.toLowerCase()) {
-        // --- GRUPA 1: Wykresy oparte na seriach ---
-        // (Line, Bump, ScatterPlot, RadialBar)
-        case 'line':
+        
         case 'bump':
+        case 'line': {
+            if (!mapping.x || !mapping.y) return [];
+            const groupedBySeries = {};
+            data.forEach(row => {
+                const seriesName = mapping.series ? String(row[mapping.series]) : 'Seria Główna';
+                if (!groupedBySeries[seriesName]) {
+                    groupedBySeries[seriesName] = [];
+                }
+                groupedBySeries[seriesName].push({
+                    x: String(row[mapping.x]),
+                    y: Number(row[mapping.y]) || 0
+                });
+            });
+            return Object.keys(groupedBySeries).map(key => ({
+                id: key,
+                data: groupedBySeries[key]
+            }));
+        }
+
         case 'scatterplot':
-        case 'radialbar':
+        case 'radialbar': {
             if (!mapping.x || !mapping.y) return data;
-            
             if (mapping.series) {
                 const grouped = data.reduce((acc, row) => {
                     const seriesName = row[mapping.series] || 'Brak serii';
@@ -36,35 +54,53 @@ export const transformNivoData = (type, data, mapping = {}) => {
                     data: data.map(row => ({ x: row[mapping.x], y: row[mapping.y] }))
                 }];
             }
+        }
 
-        // --- GRUPA 2: Wykresy kategoria-wartość (oraz mapy) ---
-        // (Pie, Funnel, Waffle, Choropleth, GeoMap)
-        // Uwaga dla map: Wymagają one podania geometrii GeoJSON w opcjach wykresu (props 'features')
+        case 'waffle': {
+            if (!mapping.id || !mapping.value) return data;
+            const totalSum = data.reduce((sum, row) => sum + (Math.max(0, Number(row[mapping.value])) || 0), 0);
+            if (totalSum === 0) return [];
+
+            let currentSum = 0;
+            const result = data.map((row, index) => {
+                const rawVal = Math.max(0, Number(row[mapping.value])) || 0;
+                let percentVal = Math.round((rawVal / totalSum) * 100);
+                
+                if (index === data.length - 1) {
+                    percentVal = 100 - currentSum;
+                }
+                currentSum += percentVal;
+
+                return {
+                    id: String(row[mapping.id] || 'Brak'),
+                    label: String(row[mapping.id] || 'Brak'),
+                    value: percentVal
+                };
+            });
+
+            mapping.total = 100;
+            return result;
+        }
+
         case 'pie':
-        case 'funnel':
-        case 'waffle':
-        case 'choropleth':
-        case 'geomap':
+        case 'funnel': {
             if (!mapping.id || !mapping.value) return data;
             return data.map(row => ({
                 id: String(row[mapping.id]),
                 label: String(row[mapping.id]),
                 value: Number(row[mapping.value]) || 0
             }));
+        }
 
-        // --- GRUPA 3: Wykresy hierarchiczne ---
-        // (TreeMap, Sunburst)
         case 'treemap':
         case 'sunburst': {
             const idKey = mapping.id || Object.keys(data[0])[0];
             const valKey = mapping.value || Object.keys(data[0])[1];
-
             const groupedData = {};
+            
             data.forEach(row => {
                 const key = String(row[idKey] || 'Nieznane');
-                // Wymuszamy float, na wypadek gdyby z CSV przyszły ułamki tekstowe
                 const val = parseFloat(row[valKey]) || 0; 
-                
                 if (val > 0) {
                     groupedData[key] = (groupedData[key] || 0) + val;
                 }
@@ -75,26 +111,15 @@ export const transformNivoData = (type, data, mapping = {}) => {
                 value: val
             }));
 
-            // Zabezpieczenie na wypadek całkowitego braku danych
             if (children.length === 0) {
                 children.push({ id: 'Brak poprawnych danych', value: 1 });
             }
 
-            const result = {
-                id: 'Root',
-                children: children
-            };
-
-            // Wypisujemy dane do konsoli, by sprawdzić co się wygenerowało!
-            console.log(`[Transform] Dane wygenerowane dla ${type}:`, result);
-            
-            return result;
+            return { id: 'Root', children: children };
         }
 
-        // --- GRUPA 4: Grafy węzłów i przepływy ---
-        // (Network, Sankey)
         case 'network':
-        case 'sankey':
+        case 'sankey': {
             if (!mapping.source || !mapping.target) return { nodes: [], links: [] };
             const nodesSet = new Set();
             const links = data.map(row => {
@@ -110,20 +135,18 @@ export const transformNivoData = (type, data, mapping = {}) => {
                 nodes: Array.from(nodesSet).map(id => ({ id })),
                 links
             };
+        }
 
-        // --- GRUPA 5: Kalendarze ---
-        // (Calendar, TimeRange)
         case 'calendar':
-        case 'timerange':
+        case 'timerange': {
             if (!mapping.date || !mapping.value) return data;
             return data.map(row => ({
                 day: String(row[mapping.date]),
                 value: Number(row[mapping.value]) || 0
             }));
+        }
 
-        // --- GRUPA 6: Macierze (Chord) ---
-        // Przekształca płaskie relacje w macierz 2D wymaganą przez Nivo Chord
-        case 'chord':
+        case 'chord': {
             if (!mapping.source || !mapping.target || !mapping.value) return { matrix: [], keys: [] };
             const uniqueNodes = Array.from(new Set(data.flatMap(d => [String(d[mapping.source]), String(d[mapping.target])])));
             const matrix = uniqueNodes.map(() => uniqueNodes.map(() => 0));
@@ -136,10 +159,9 @@ export const transformNivoData = (type, data, mapping = {}) => {
                 }
             });
             return { matrix, keys: uniqueNodes };
+        }
 
-        // --- GRUPA 7: Wskaźniki kulowe (Bullet) ---
-        // --- GRUPA 7: Wskaźniki kulowe (Bullet) ---
-        case 'bullet':
+        case 'bullet': {
             if (!mapping.id) return data;
             return data.map(row => ({
                 id: String(row[mapping.id]),
@@ -147,29 +169,79 @@ export const transformNivoData = (type, data, mapping = {}) => {
                 measures: mapping.measures ? parseToArray(row[mapping.measures]) : [0],
                 markers: mapping.markers ? parseToArray(row[mapping.markers]) : [0]
             }));
+        }
 
-        // --- GRUPA 8: HeatMap (Nowe API Nivo v0.80+) ---
-        // Wymaga zagnieżdżonych danych: [{ id: 'wiersz', data: [{ x: 'kolumna', y: wartosc }] }]
-        case 'heatmap':
+        case 'heatmap': {
             if (!mapping.x || !mapping.y) return data;
             return data.map(row => ({
                 id: String(row[mapping.x]),
                 data: [{
-                    x: mapping.y, // Nazwa kolumny (np. 'Zysk')
+                    x: mapping.y,
                     y: Number(row[mapping.y]) || 0
                 }]
             }));
+        }
 
-        // --- GRUPA 9: Wykresy płaskie (wspierane przez wewn. opcje Nivo) ---
+        case 'stream': {
+            if (!mapping.x || !mapping.y || !mapping.series) return data;
+            console.log("stream after if");
+            
+            const grouped = {};
+            const allSeries = new Set();
+            // Zbieramy wszystkie unikalne wartości osi X w kolejności ich występowania
+            const xOrder = new Set(); 
+
+            data.forEach(row => {
+                const xVal = String(row[mapping.x]);
+                const seriesName = String(row[mapping.series]);
+                // Ważne: Wymuszamy liczby zmiennoprzecinkowe, usuwamy NaN
+                const yVal = parseFloat(row[mapping.y]) || 0; 
+
+                allSeries.add(seriesName);
+                xOrder.add(xVal);
+                
+                if (!grouped[xVal]) grouped[xVal] = {}; 
+                // Zbieramy wartości. Dla streama musimy uważać, by się nie znosiły, jeśli np. mamy kilka wpisów na ten sam timestamp dla jednego miasta.
+                // Tu sumujemy wartości dla danego miasta w danym czasie.
+                grouped[xVal][seriesName] = (grouped[xVal][seriesName] || 0) + Math.max(0, yVal); 
+            });
+
+            // Iterujemy po xOrder, żeby zachować chronologię na osi X
+            console.log(Array.from(xOrder).map(xVal => {
+                const obj = grouped[xVal];
+                const cleanRow = {};
+                allSeries.forEach(s => {
+                    // Jeśli dla danego czasu miasto nie ma danych, wstawiamy twarde 0, żeby fala zeszła płynnie w dół, a nie urwała się nagle.
+                    cleanRow[s] = obj[s] || 0; 
+                });
+                // console.log(cleanRow);
+                
+                return cleanRow;
+            }));
+            
+            return Array.from(xOrder).map(xVal => {
+                const obj = grouped[xVal];
+                const cleanRow = {};
+                allSeries.forEach(s => {
+                    // Jeśli dla danego czasu miasto nie ma danych, wstawiamy twarde 0, żeby fala zeszła płynnie w dół, a nie urwała się nagle.
+                    cleanRow[s] = obj[s] || 0; 
+                });
+                // console.log(cleanRow);
+                
+                return cleanRow;
+            });
+        }
+
         case 'bar':
         case 'radar':
-        case 'stream':
         case 'swarmplot':
         case 'parallel':
-        case 'marimekko':
+        case 'marimekko': {
             return data;
+        }
 
-        default:
+        default: {
             return data;
+        }
     }
 };

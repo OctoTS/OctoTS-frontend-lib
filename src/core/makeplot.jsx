@@ -206,7 +206,15 @@ export const makeplot = (engine = 'nivo', chartType, data, mapping = {}, options
                 break;
 
             case 'stream':
-                nivoProps.keys = mapping.y ? [mapping.y] : options.keys;
+                // 1. Zamiast nadpisywać klucze nazwą osi Y, bierzemy je mądrze:
+                // Priorytet: podane ręcznie -> z opcji -> DYNAMICZNIE z gotowych danych transformera!
+                nivoProps.keys = mapping.keys || options.keys || (finalData.length > 0 ? Object.keys(finalData[0]) : []);
+                
+                // 2. Dodajemy domyślne parametry, żeby fale od razu wyglądały płynnie i ładnie
+                if (!nivoProps.offsetType) nivoProps.offsetType = 'silhouette';
+                if (!nivoProps.curve) nivoProps.curve = 'monotoneX';
+                
+                // 3. (Opcjonalnie) Upewniamy się, że wszystko jest twardą liczbą
                 if (nivoProps.keys && finalData.length > 0) {
                     finalData = finalData.map(row => {
                         const cleanRow = { ...row };
