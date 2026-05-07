@@ -1,6 +1,5 @@
 import { createRoot } from 'react-dom/client';
 
-// --- NIVO IMPORTS ---
 import { ResponsiveBump } from '@nivo/bump';
 import { ResponsiveBar } from '@nivo/bar';
 import { ResponsivePie } from '@nivo/pie';
@@ -24,11 +23,9 @@ import { ResponsiveWaffle } from '@nivo/waffle';
 import { ResponsiveCalendar, ResponsiveTimeRange } from '@nivo/calendar';
 import { ResponsiveRadialBar } from '@nivo/radial-bar';
 
-// --- INNE SILNIKI ---
 import ReactECharts from 'echarts-for-react';
 import ReactApexChart from 'react-apexcharts';
 
-// --- TRANSFORMERY ---
 import { transformNivoData } from '../transformers/nivo.jsx';
 import { transformEchartsData } from '../transformers/echarts.jsx';
 
@@ -36,7 +33,8 @@ import { Chart as ChartJS, registerables } from 'chart.js';
 import { Chart as ReactChartjs } from 'react-chartjs-2';
 import { transformChartjsData } from '../transformers/chartsjs.jsx';
 
-// Rejestracja wszystkich kontrolerów i elementów Chart.js
+import { guessMapping } from './detector.js';
+
 ChartJS.register(...registerables);
 
 const NivoComponents = {
@@ -66,34 +64,26 @@ const NivoComponents = {
     'radialbar': ResponsiveRadialBar
 };
 
-// --- FUNKCJA POMOCNICZA DO AGREGACJI (ŚREDNIA) ---
 const aggregateData = (data, groupByField, method = 'avg') => {
     if (!groupByField || !data || data.length === 0) return data;
 
     const grouped = {};
-    
-    // Automatycznie wykrywamy wszystkie kolumny numeryczne (pomijając klucz grupowania)
     const numericKeys = Object.keys(data[0]).filter(k => 
         k !== groupByField && !isNaN(parseFloat(data[0][k]))
     );
 
     data.forEach(row => {
         const key = row[groupByField];
-
         if (!grouped[key]) {
-            // Zapisujemy pierwszy wiersz, by zachować wszystkie teksty i strukturę
             grouped[key] = { count: 0, sums: {}, firstRow: { ...row } };
             numericKeys.forEach(nk => grouped[key].sums[nk] = 0);
         }
-        
         grouped[key].count += 1;
         numericKeys.forEach(nk => {
-            // Sumujemy tylko kolumny liczbowe
             grouped[key].sums[nk] += (Number(row[nk]) || 0);
         });
     });
 
-    // Zwracamy tablicę z podmienionymi średnimi
     return Object.values(grouped).map(group => {
         const finalRow = { ...group.firstRow };
         numericKeys.forEach(nk => {
@@ -103,26 +93,25 @@ const aggregateData = (data, groupByField, method = 'avg') => {
     });
 };
 
-// --- GŁÓWNA FUNKCJA MAKEPLOT ---
 export const makeplot = (engine = 'nivo', chartType, data, mapping = {}, options = {}) => {
     let chartElement;
     const type = chartType?.toLowerCase();
+    const columns = data.length > 0 ? Object.keys(data[0]) : [];
+
+    let finalMapping = { ...mapping };
+    if (options.autodetect === true) {
+        const detected = guessMapping(data, columns);
+        finalMapping = { ...detected, ...mapping };
+    }
     
-    // 1. Zabezpieczamy dane i od razu robimy agregację
     let finalData = [...data];
     const skipAggregation = ['scatter', 'bubble', 'swarmplot'].includes(type);
 
     if (!skipAggregation && options.aggregate !== false && finalData.length > 0) {
-        // Szukamy tylko po czym grupować (np. autor)
-        const groupKey = mapping.x || mapping.id || Object.keys(finalData[0])[0];
-        
-        // Przekazujemy do nowej funkcji - sama zajmie się wszystkimi liczbami!
+        const groupKey = finalMapping.x || finalMapping.id || Object.keys(finalData[0])[0];
         finalData = aggregateData(finalData, groupKey, options.aggregate || 'avg');
     }
 
-    // ==========================================
-    // 1. SILNIK NIVO
-    // ==========================================
     if (engine === 'nivo') {
         const ChartComponent = NivoComponents[type];
         if (!ChartComponent) {
@@ -134,7 +123,6 @@ export const makeplot = (engine = 'nivo', chartType, data, mapping = {}, options
 
         const unsupportedCharts = ['parallel', 'choropleth', 'geomap'];
         if (unsupportedCharts.includes(type)) {
-            console.warn(`[MakePlot] Wykres typu '${type}' nie jest obsługiwany przez tę bibliotekę.`);
             const errorContainer = document.createElement('div');
             errorContainer.style.display = 'flex';
             errorContainer.style.alignItems = 'center';
@@ -151,43 +139,37 @@ export const makeplot = (engine = 'nivo', chartType, data, mapping = {}, options
             return errorContainer;
         }
 
-        // Transformacja pod Nivo z użyciem ZAGREGOWANYCH danych
-        finalData = transformNivoData(type, finalData, mapping);
+        finalData = transformNivoData(type, finalData, finalMapping);
         const nivoProps = { ...options };
 
         switch (type) {
             case 'bar':
             case 'radar':
-                nivoProps.indexBy = mapping.x || options.indexBy || 'id';
-                nivoProps.keys = mapping.y ? [mapping.y] : options.keys || ['value'];
+                nivoProps.indexBy = finalMapping.x || options.indexBy || 'id';
+                nivoProps.keys = finalMapping.y ? [finalMapping.y] : options.keys || ['value'];
                 break;
-
             case 'treemap':
                 nivoProps.identity = 'id';
                 nivoProps.value = 'value';
                 break;
-
             case 'sunburst':
                 nivoProps.id = 'id';
                 nivoProps.value = 'value';
                 nivoProps.cornerRadius = 2;
                 break;
-
             case 'calendar':
             case 'timerange':
                 if (!nivoProps.from) nivoProps.from = finalData[0]?.day || '2023-01-01';
                 if (!nivoProps.to) nivoProps.to = finalData[finalData.length - 1]?.day || '2023-12-31';
                 break;
-
             case 'chord':
                 nivoProps.keys = finalData.keys;
                 finalData = finalData.matrix; 
                 break;
-
             case 'swarmplot':
-                nivoProps.groupBy = mapping.x || options.groupBy || 'id';
-                nivoProps.value = mapping.y || options.value || 'value';
-                nivoProps.identity = mapping.id || mapping.x || 'id'; 
+                nivoProps.groupBy = finalMapping.x || options.groupBy || 'id';
+                nivoProps.value = finalMapping.y || options.value || 'value';
+                nivoProps.identity = finalMapping.id || finalMapping.x || 'id'; 
                 if (!nivoProps.groups && finalData.length > 0) {
                     nivoProps.groups = Array.from(new Set(finalData.map(item => String(item[nivoProps.groupBy]))));
                 }
@@ -196,17 +178,15 @@ export const makeplot = (engine = 'nivo', chartType, data, mapping = {}, options
                     [nivoProps.value]: Number(row[nivoProps.value]) || 0
                 }));
                 break;
-
             case 'marimekko':
-                nivoProps.id = mapping.x || options.id || 'id';
-                nivoProps.value = mapping.y || options.value || 'value';
+                nivoProps.id = finalMapping.x || options.id || 'id';
+                nivoProps.value = finalMapping.y || options.value || 'value';
                 if (!nivoProps.dimensions) {
-                    nivoProps.dimensions = [{ id: 'Domyślny wymiar', value: mapping.y || 'value' }];
+                    nivoProps.dimensions = [{ id: 'Default', value: finalMapping.y || 'value' }];
                 }
                 break;
-
             case 'stream':
-                nivoProps.keys = mapping.y ? [mapping.y] : options.keys;
+                nivoProps.keys = finalMapping.y ? [finalMapping.y] : options.keys;
                 if (nivoProps.keys && finalData.length > 0) {
                     finalData = finalData.map(row => {
                         const cleanRow = { ...row };
@@ -225,18 +205,13 @@ export const makeplot = (engine = 'nivo', chartType, data, mapping = {}, options
             </div>
         );
     }
-    // ==========================================
-    // 2. SILNIK ECHARTS
-    // ==========================================
     else if (engine === 'echarts') {
-        const echartsData = transformEchartsData(type, finalData, mapping);
-        
+        const echartsData = transformEchartsData(type, finalData, finalMapping);
         let option = {
             tooltip: { trigger: 'item' },
             legend: { top: 'bottom' },
             ...options 
         };
-
         const firstRowKeys = finalData.length > 0 ? Object.keys(finalData[0]) : [];
 
         switch (type) {
@@ -251,15 +226,14 @@ export const makeplot = (engine = 'nivo', chartType, data, mapping = {}, options
                     type: type === 'area' ? 'line' : type,
                     areaStyle: type === 'area' ? {} : undefined,
                     encode: {
-                        x: mapping.x || firstRowKeys[0],
-                        y: mapping.y || firstRowKeys[1]
+                        x: finalMapping.x || firstRowKeys[0],
+                        y: finalMapping.y || firstRowKeys[1]
                     }
                 }];
-                if (mapping.series) {
-                    option.series[0].encode.seriesName = mapping.series;
+                if (finalMapping.series) {
+                    option.series[0].encode.seriesName = finalMapping.series;
                 }
                 break;
-
             case 'pie':
             case 'funnel':
                 option.series = [{
@@ -275,9 +249,8 @@ export const makeplot = (engine = 'nivo', chartType, data, mapping = {}, options
                     }
                 }];
                 break;
-
             case 'radar':
-                const radarKeys = firstRowKeys.filter(k => k !== mapping.x);
+                const radarKeys = firstRowKeys.filter(k => k !== finalMapping.x);
                 option.radar = {
                     indicator: radarKeys.map(k => ({ name: k }))
                 };
@@ -285,11 +258,10 @@ export const makeplot = (engine = 'nivo', chartType, data, mapping = {}, options
                     type: 'radar',
                     data: finalData.map(row => ({
                         value: radarKeys.map(k => Number(row[k]) || 0),
-                        name: row[mapping.x]
+                        name: row[finalMapping.x]
                     }))
                 }];
                 break;
-
             case 'treemap':
             case 'sunburst':
                 option.series = [{
@@ -299,7 +271,6 @@ export const makeplot = (engine = 'nivo', chartType, data, mapping = {}, options
                     label: { show: true, formatter: '{b}' } 
                 }];
                 break;
-
             case 'network':
             case 'graph':
                 option.series = [{
@@ -311,7 +282,6 @@ export const makeplot = (engine = 'nivo', chartType, data, mapping = {}, options
                     label: { show: true }
                 }];
                 break;
-
             case 'sankey':
                 option.series = [{
                     type: 'sankey',
@@ -321,14 +291,13 @@ export const makeplot = (engine = 'nivo', chartType, data, mapping = {}, options
                     lineStyle: { color: 'gradient', curveness: 0.5 }
                 }];
                 break;
-
             case 'heatmap':
                 option.dataset = { source: finalData };
                 option.xAxis = { type: 'category' };
                 option.yAxis = { type: 'category' };
                 option.visualMap = {
                     min: 0,
-                    max: Math.max(...finalData.map(d => Number(d[mapping.value || Object.keys(d)[2]]) || 0)),
+                    max: Math.max(...finalData.map(d => Number(d[finalMapping.value || Object.keys(d)[2]]) || 0)),
                     calculable: true,
                     orient: 'horizontal',
                     left: 'center',
@@ -337,15 +306,13 @@ export const makeplot = (engine = 'nivo', chartType, data, mapping = {}, options
                 option.series = [{
                     type: 'heatmap',
                     encode: {
-                        x: mapping.x || firstRowKeys[0],
-                        y: mapping.y || firstRowKeys[1],
-                        value: mapping.value || firstRowKeys[2]
+                        x: finalMapping.x || firstRowKeys[0],
+                        y: finalMapping.y || firstRowKeys[1],
+                        value: finalMapping.value || firstRowKeys[2]
                     }
                 }];
                 break;
-
             default:
-                console.warn(`[MakePlot] Wykres typu '${type}' nie ma specyficznej konfiguracji w ECharts.`);
                 option.dataset = { source: finalData };
                 option.series = [{ type: type }];
                 break;
@@ -355,7 +322,6 @@ export const makeplot = (engine = 'nivo', chartType, data, mapping = {}, options
         container.style.width = '100%';
         container.style.height = '100%';
         container.style.minHeight = '300px';
-
         const root = createRoot(container);
         root.render(
             <ReactECharts 
@@ -366,12 +332,8 @@ export const makeplot = (engine = 'nivo', chartType, data, mapping = {}, options
         );
         return container;
     }
-    // ==========================================
-    // 3. SILNIK CHART.JS
-    // ==========================================
     else if (engine === 'chartjs') {
-        const chartData = transformChartjsData(type, finalData, mapping);
-        
+        const chartData = transformChartjsData(type, finalData, finalMapping);
         let chartType = type;
         if (chartType === 'polararea') chartType = 'polarArea';
         if (chartType === 'area') {
@@ -379,50 +341,34 @@ export const makeplot = (engine = 'nivo', chartType, data, mapping = {}, options
             chartData.datasets.forEach(ds => ds.fill = true); 
         }
         if (chartType === 'donut') chartType = 'doughnut';
-
         const chartOptions = {
             responsive: true,
             maintainAspectRatio: false,
-            plugins: {
-                legend: { position: 'bottom' }
-            },
+            plugins: { legend: { position: 'bottom' } },
             ...options
         };
-
         const container = document.createElement('div');
         container.style.width = '100%';
         container.style.height = '100%';
         container.style.minHeight = '300px';
-
         const root = createRoot(container);
-        root.render(
-            <ReactChartjs 
-                type={chartType}
-                data={chartData} 
-                options={chartOptions} 
-            />
-        );
+        root.render(<ReactChartjs type={chartType} data={chartData} options={chartOptions} />);
         return container;
     } 
-    // ==========================================
-    // 4. SILNIK APEXCHARTS
-    // ==========================================
     else if (engine === 'apexcharts') {
         let apexType = type;
         if (apexType === 'polararea') apexType = 'polarArea';
         if (apexType === 'doughnut') apexType = 'donut'; 
         if (apexType === 'radialbar') apexType = 'radialBar';
-        
         let apexSeries = [];
         let apexOptions = {
             chart: { toolbar: { show: false } },
             legend: { position: 'bottom' },
             ...options
         };
-
         const firstRowKeys = finalData.length > 0 ? Object.keys(finalData[0]) : [];
-        const groupKey = mapping.x || mapping.id || firstRowKeys[0];
-        const valueKey = mapping.y || mapping.value || firstRowKeys[1];
+        const groupKey = finalMapping.x || finalMapping.id || firstRowKeys[0];
+        const valueKey = finalMapping.y || finalMapping.value || firstRowKeys[1];
 
         if (['pie', 'donut', 'polarArea', 'radialBar'].includes(apexType)) {
             apexSeries = finalData.map(row => Number(row[valueKey]) || 0);
@@ -438,50 +384,32 @@ export const makeplot = (engine = 'nivo', chartType, data, mapping = {}, options
         } 
         else {
             apexSeries = [{
-                name: mapping.series || 'Wartość',
+                name: finalMapping.series || 'Value',
                 data: finalData.map(row => ({
                     x: String(row[groupKey]),
                     y: Number(row[valueKey]) || 0
                 }))
             }];
-            if (!apexOptions.xaxis) {
-                apexOptions.xaxis = { type: 'category' };
-            }
+            if (!apexOptions.xaxis) apexOptions.xaxis = { type: 'category' };
         }
-
         const container = document.createElement('div');
         container.style.width = '100%';
         container.style.height = '100%';
         container.style.minHeight = '300px';
-
         const root = createRoot(container);
-        root.render(
-            <ReactApexChart 
-                options={apexOptions} 
-                series={apexSeries} 
-                type={apexType} 
-                height="100%" 
-                width="100%"
-            />
-        );
+        root.render(<ReactApexChart options={apexOptions} series={apexSeries} type={apexType} height="100%" width="100%" />);
         return container;
     }
-    // ==========================================
-    // FALLBACK
-    // ==========================================
     else {
         const err = document.createElement('div');
         err.style.color = 'red'; err.textContent = `Błąd: Nieobsługiwany silnik "${engine}".`;
         return err;
     }
 
-    // Wykonuje się tylko dla Nivo (inne silniki mają własne return)
     const container = document.createElement('div');
     container.style.width = '100%';
     container.style.height = '100%';
-
     const root = createRoot(container);
     root.render(chartElement);
-
     return container;
 };
