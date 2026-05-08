@@ -18,7 +18,7 @@ Currently, the library is fully ready to be used in pure HTML via a CDN link.
 Simply add the following script to the `<head>` or `<body>` section of your HTML file:
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/OctoTS/OctoTS-frontend-lib@refs/heads/main/dist/OctoTS-plot-lib.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/OctoTS/OctoTS-frontend-lib@v2.1.1/dist/OctoTS-plot-lib.js"></script>
 ```
 ### NPM
 ⏳ **NPM package coming soon!** > A version installable via Node.js package managers will be available shortly.
@@ -33,7 +33,7 @@ The library exposes a global `window.makeplot` function that returns a ready-to-
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Chart Test</title>
-    <script src="https://cdn.jsdelivr.net/gh/OctoTS/OctoTS-frontend-lib@refs/heads/main/dist/OctoTS-plot-lib.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/OctoTS/OctoTS-frontend-lib@v2.1.1/dist/OctoTS-plot-lib.js"></script>
 </head>
 <body>
 
@@ -143,7 +143,7 @@ To keep the core library ultra-lightweight and prevent your browser from crashin
 
 
 ## 🛠 Plotting API
-`makeplot(chartType, data, options, engine)`
+`makeplot(engine, chartType, data, mapping, options)`
 
 The function creates and returns an HTML element (`<div>`) where a React framework operates and renders the appropriate chart.
 
@@ -154,6 +154,7 @@ The function creates and returns an HTML element (`<div>`) where a React framewo
 | `chartType` | `string` | *required* | The type of the chart (e.g., `'bar'`, `'line'`, `'pie'`).
 | `data` | `Array / Object` | *required* | Chart data. The format depends on the chosen engine.
 | `options` | `Object` | `{}` | Chart configuration (e.g., margins, colors, axes). Structure depends on the engine.
+| `mepping` | `Object` | `{}` | Key value object for mapping data in plot
 | `engine` | `string` | `'nivo'` | Rendering engine. Available options: `'nivo'`, `'echarts'`, `'chartjs'`, `'apex'`.
 
 ## 🧩 Supported Engines and Chart Types
