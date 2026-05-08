@@ -140,10 +140,25 @@ export const transformNivoData = (type, data, mapping = {}) => {
         case 'calendar':
         case 'timerange': {
             if (!mapping.date || !mapping.value) return data;
-            return data.map(row => ({
-                day: String(row[mapping.date]),
-                value: Number(row[mapping.value]) || 0
-            }));
+            
+            return data.map(row => {
+                const rawDate = String(row[mapping.date]).trim();
+                const d = new Date(rawDate);
+                
+                let formattedDay = rawDate;
+                // Jeśli data jest poprawna, wymuszamy sztywny format Nivo: YYYY-MM-DD
+                if (!isNaN(d.getTime())) {
+                    const year = d.getFullYear();
+                    const month = String(d.getMonth() + 1).padStart(2, '0');
+                    const day = String(d.getDate()).padStart(2, '0');
+                    formattedDay = `${year}-${month}-${day}`;
+                }
+
+                return {
+                    day: formattedDay,
+                    value: Number(row[mapping.value]) || 0
+                };
+            }).filter(item => item.value > 0); // Nivo lubi mieć tylko dni, w których faktycznie coś się działo
         }
 
         case 'chord': {
