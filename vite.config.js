@@ -9,7 +9,7 @@ export default defineConfig({
   },
   build: {
     lib: {
-      entry: resolve(__dirname, 'index.jsx'),
+      entry: resolve(__dirname, 'src/index.jsx'),
       name: 'OctoTSPlotLib',
       fileName: () => `OctoTS-plot-lib.js`,
       formats: ['iife']
