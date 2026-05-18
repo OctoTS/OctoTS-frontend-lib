@@ -22,6 +22,37 @@ const parseDelimited = (text, delimiter = ',') => {
     return data;
 };
 
+const escapeHTML = (val) => {
+    // Jeśli to nie jest string (np. liczba, null, obiekt), zostawiamy w spokoju
+    if (typeof val !== 'string') return val;
+    return val.replace(/[&<>'"]/g, 
+        tag => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            "'": '&#39;',
+            '"': '&quot;'
+        }[tag] || tag)
+    );
+};
+
+const sanitizeData = (dataArray) => {
+    if (!Array.isArray(dataArray)) return dataArray;
+    
+    return dataArray.map(row => {
+        const sanitizedRow = {};
+        for (const key in row) {
+            if (Object.prototype.hasOwnProperty.call(row, key)) {
+                // Czyścimy klucz (nazwę kolumny)
+                const safeKey = escapeHTML(key);
+                // Czyścimy wartość
+                sanitizedRow[safeKey] = escapeHTML(row[key]);
+            }
+        }
+        return sanitizedRow;
+    });
+};
+
 const parseJSON = (text) => JSON.parse(text);
 
 const parseJSONL = (text) => text.trim().split('\n').filter(l => l.trim()).map(JSON.parse);
@@ -188,12 +219,14 @@ export const loadData = async (source) => {
         return { data: [], columns: [] };
     }
 
+    const safeData = sanitizeData(parsedData);
+
     // Wyciągamy klucze z pierwszego wiersza (nagłówki)
-    const columns = Object.keys(parsedData[0]);
+    const columns = Object.keys(safeData[0]);
 
     // Zwracamy obiekt z danymi i nagłówkami
     return {
-        data: parsedData,
+        data: safeData,
         columns: columns
     };
 };
